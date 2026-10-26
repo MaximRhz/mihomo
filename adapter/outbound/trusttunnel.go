@@ -2,6 +2,8 @@ package outbound
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"net"
 	"strconv"
 
@@ -19,22 +21,23 @@ type TrustTunnel struct {
 
 type TrustTunnelOption struct {
 	BasicOption
-	Name              string     `proxy:"name"`
-	Server            string     `proxy:"server"`
-	Port              int        `proxy:"port"`
-	UserName          string     `proxy:"username,omitempty"`
-	Password          string     `proxy:"password,omitempty"`
-	ALPN              []string   `proxy:"alpn,omitempty"`
-	SNI               string     `proxy:"sni,omitempty"`
-	ECHOpts           ECHOptions `proxy:"ech-opts,omitempty"`
-	ClientFingerprint string     `proxy:"client-fingerprint,omitempty"`
-	SkipCertVerify    bool       `proxy:"skip-cert-verify,omitempty"`
-	NameCertVerify    string     `proxy:"name-cert-verify,omitempty"`
-	Fingerprint       string     `proxy:"fingerprint,omitempty"`
-	Certificate       string     `proxy:"certificate,omitempty"`
-	PrivateKey        string     `proxy:"private-key,omitempty"`
-	UDP               bool       `proxy:"udp,omitempty"`
-	HealthCheck       bool       `proxy:"health-check,omitempty"`
+	Name                string     `proxy:"name"`
+	Server              string     `proxy:"server"`
+	Port                int        `proxy:"port"`
+	UserName            string     `proxy:"username,omitempty"`
+	Password            string     `proxy:"password,omitempty"`
+	ALPN                []string   `proxy:"alpn,omitempty"`
+	SNI                 string     `proxy:"sni,omitempty"`
+	ECHOpts             ECHOptions `proxy:"ech-opts,omitempty"`
+	ClientFingerprint   string     `proxy:"client-fingerprint,omitempty"`
+	SkipCertVerify      bool       `proxy:"skip-cert-verify,omitempty"`
+	NameCertVerify      string     `proxy:"name-cert-verify,omitempty"`
+	ClientRandomAuthKey string     `proxy:"client-random-auth-key,omitempty"`
+	Fingerprint         string     `proxy:"fingerprint,omitempty"`
+	Certificate         string     `proxy:"certificate,omitempty"`
+	PrivateKey          string     `proxy:"private-key,omitempty"`
+	UDP                 bool       `proxy:"udp,omitempty"`
+	HealthCheck         bool       `proxy:"health-check,omitempty"`
 	// quic options
 	Quic                 bool   `proxy:"quic,omitempty"`
 	CongestionController string `proxy:"congestion-controller,omitempty"`
@@ -85,6 +88,14 @@ func (t *TrustTunnel) Close() error {
 }
 
 func NewTrustTunnel(option TrustTunnelOption) (*TrustTunnel, error) {
+	var authKey []byte
+	if option.ClientRandomAuthKey != "" {
+		var err error
+		authKey, err = base64.StdEncoding.DecodeString(option.ClientRandomAuthKey)
+		if err != nil || len(authKey) != 32 {
+			return nil, errors.New("invalid TrustTunnel client random auth key")
+		}
+	}
 	addr := net.JoinHostPort(option.Server, strconv.Itoa(option.Port))
 	outbound := &TrustTunnel{
 		Base: NewBase(BaseOption{
@@ -123,15 +134,16 @@ func NewTrustTunnel(option TrustTunnelOption) (*TrustTunnel, error) {
 		return nil, err
 	}
 	tlsConfig := &vmess.TLSConfig{
-		Host:              option.SNI,
-		SkipCertVerify:    option.SkipCertVerify,
-		NameCertVerify:    option.NameCertVerify,
-		NextProtos:        option.ALPN,
-		FingerPrint:       option.Fingerprint,
-		Certificate:       option.Certificate,
-		PrivateKey:        option.PrivateKey,
-		ClientFingerprint: option.ClientFingerprint,
-		ECH:               echConfig,
+		Host:                option.SNI,
+		SkipCertVerify:      option.SkipCertVerify,
+		NameCertVerify:      option.NameCertVerify,
+		ClientRandomAuthKey: authKey,
+		NextProtos:          option.ALPN,
+		FingerPrint:         option.Fingerprint,
+		Certificate:         option.Certificate,
+		PrivateKey:          option.PrivateKey,
+		ClientFingerprint:   option.ClientFingerprint,
+		ECH:                 echConfig,
 	}
 	if tlsConfig.Host == "" {
 		tlsConfig.Host = option.Server

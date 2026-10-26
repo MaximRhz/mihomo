@@ -17,21 +17,22 @@ import (
 )
 
 type TLSConfig struct {
-	Host              string
-	SkipCertVerify    bool
-	NameCertVerify    string
-	FingerPrint       string
-	Certificate       string
-	PrivateKey        string
-	ClientFingerprint string
-	NextProtos        []string
-	ECH               *ech.Config
-	ShadowTLS         *shadowtls.Config
-	Restls            *restls.Config
-	JLS               *jls.Config
-	Reality           *tlsC.RealityConfig
-	TLSMirror         *tlsmirror.Config
-	TLSMirrorDialer   tlsmirror.EnrollmentDialer
+	Host                string
+	SkipCertVerify      bool
+	NameCertVerify      string
+	FingerPrint         string
+	Certificate         string
+	PrivateKey          string
+	ClientFingerprint   string
+	ClientRandomAuthKey []byte
+	NextProtos          []string
+	ECH                 *ech.Config
+	ShadowTLS           *shadowtls.Config
+	Restls              *restls.Config
+	JLS                 *jls.Config
+	Reality             *tlsC.RealityConfig
+	TLSMirror           *tlsmirror.Config
+	TLSMirrorDialer     tlsmirror.EnrollmentDialer
 }
 
 func (cfg *TLSConfig) ToStdConfig() (*tls.Config, error) {
@@ -121,11 +122,29 @@ func StreamTLSConn(ctx context.Context, conn net.Conn, cfg *TLSConfig) (net.Conn
 			return nil, err
 		}
 		tlsConn := tlsC.UClient(conn, tlsConfig, clientFingerprint)
+		if len(cfg.ClientRandomAuthKey) != 0 {
+			if err = tlsConn.BuildHandshakeState(); err != nil {
+				return nil, err
+			}
+			random, randomErr := deriveClientRandom(cfg.ClientRandomAuthKey, cfg.Host, nil)
+			if randomErr != nil {
+				return nil, randomErr
+			}
+			if err = tlsConn.SetClientRandom(random); err != nil {
+				return nil, err
+			}
+			if err = tlsConn.BuildHandshakeState(); err != nil {
+				return nil, err
+			}
+		}
 		err = tlsConn.HandshakeContext(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return tlsConn, nil
+	}
+	if len(cfg.ClientRandomAuthKey) != 0 {
+		return nil, errors.New("TrustTunnel client random auth key requires a TLS client fingerprint")
 	}
 	if cfg.Reality != nil {
 		return nil, errors.New("REALITY is based on uTLS, please set a client-fingerprint")
